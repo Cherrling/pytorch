@@ -33,6 +33,7 @@ from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     TEST_WITH_ROCM,
+    xfailIfNoAcceleratorTriton,
 )
 
 
@@ -190,6 +191,7 @@ class TestStreamCodegen(InductorTestCase):
 
 
 @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+@xfailIfNoAcceleratorTriton
 class TestUserStreamCompile(InductorTestCase):
     """End-to-end tests for torch.compile with user stream contexts."""
 
@@ -1454,6 +1456,7 @@ class GraphModule(torch.nn.Module):
 
 
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
+@xfailIfNoAcceleratorTriton
 class TestStreamOrderingStress(InductorTestCase):
     """Stress tests verifying that interleaved event record/wait ops
     produce correct ordering under compilation.  Each test uses large
@@ -1736,6 +1739,7 @@ class TestStreamOrderingStress(InductorTestCase):
 
 
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
+@xfailIfNoAcceleratorTriton
 class TestGenericStreamCompile(InductorTestCase):
     """Tests for torch.compile with device-agnostic torch.Stream API."""
 
@@ -1890,6 +1894,7 @@ class TestGenericStreamCompile(InductorTestCase):
 
 
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
+@xfailIfNoAcceleratorTriton
 class TestStreamIdentity(InductorTestCase):
     """Verify that compiled code uses the user's original stream objects."""
 
@@ -1953,6 +1958,7 @@ class TestPDLWithMultiStream(InductorTestCase):
     and still applies within each stream's own kernel sequence.
     """
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
     def test_pdl_single_side_stream(self):
@@ -1985,6 +1991,7 @@ class TestPDLWithMultiStream(InductorTestCase):
             .check("gdc_launch")
         ).run(triton_code)
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
     def test_pdl_correctness_with_multiple_streams(self):
@@ -2032,6 +2039,7 @@ class TestPDLWithMultiStream(InductorTestCase):
             .check("gdc_launch")
         ).run(triton_code)
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
     def test_pdl_cross_stream_events_preserved(self):
@@ -2079,6 +2087,7 @@ class TestPDLWithMultiStream(InductorTestCase):
             .check("gdc_launch")
         ).run(triton_code)
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
     def test_pdl_same_stream_consecutive_kernels(self):
@@ -2111,6 +2120,7 @@ class TestPDLWithMultiStream(InductorTestCase):
             .check("gdc_launch")
         ).run(triton_code)
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
     def test_pdl_no_fusion_across_streams(self):
@@ -2166,6 +2176,7 @@ class TestPDLWithMultiStream(InductorTestCase):
             .check("gdc_launch")
         ).run(triton_code)
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
     def test_pdl_stress_multistream_correctness(self):
@@ -2219,6 +2230,7 @@ class TestPDLWithMultiStream(InductorTestCase):
             torch.cuda.synchronize()
             self.assertEqual(actual, expected)
 
+    @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @inductor_config.patch({"triton.enable_pdl": True})
     def test_pdl_mutation_across_streams(self):
