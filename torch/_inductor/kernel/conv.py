@@ -1013,6 +1013,7 @@ def convolution_backward_lowering(
     dw = None
     choices_dw = []
     args_w = []
+    layout_dw = None
     if output_mask[1]:
         if V.graph.layout_opt and ndim == 2:
             V.graph.num_channels_last_conv += 1
@@ -1068,6 +1069,7 @@ def convolution_backward_lowering(
     dx = None
     choices_dx = []
     args_x = []
+    layout_dx = None
     if output_mask[0]:
         if V.graph.layout_opt and ndim == 2:
             V.graph.num_channels_last_conv += 1
