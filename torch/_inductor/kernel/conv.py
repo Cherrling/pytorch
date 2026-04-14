@@ -970,6 +970,7 @@ def convolution_backward_lowering(
     triggering an automatic fallback to the ATen reference implementation.
     This ensures correctness for all cases while enabling TRITON optimizations only where implemented.
     """
+    guard = V.graph.sizevars.guard_int_seq
     stride = tuple(stride)
     padding = tuple(padding)
     dilation = tuple(dilation)
@@ -979,8 +980,10 @@ def convolution_backward_lowering(
 
     out_chan, in_chan, *kernel_shape = V.graph.sizevars.guard_int_seq(weight.get_size())
 
-    stride = tuple(V.graph.sizevars.guard_int_seq(stride))
-    padding = tuple(V.graph.sizevars.guard_int_seq(padding))
+    stride = tuple(guard(stride))
+    padding = tuple(guard(padding))
+    dilation = tuple(guard(dilation))
+    output_padding = tuple(guard(output_padding))
 
     input.realize()
     weight.realize()
@@ -1010,7 +1013,6 @@ def convolution_backward_lowering(
     dw = None
     choices_dw = []
     args_w = []
-    layout_dw = conv_bwd_weight_layout(grad_out, input, weight, **kwargs)
     if output_mask[1]:
         if V.graph.layout_opt and ndim == 2:
             V.graph.num_channels_last_conv += 1
@@ -1018,10 +1020,12 @@ def convolution_backward_lowering(
             grad_out = ir.ExternKernel.require_channels_last(grad_out)  # type: ignore[assignment]
             layout_dw = conv_bwd_weight_layout(grad_out, input, weight, **kwargs)
         else:
-            guard = V.graph.sizevars.guard_int_seq
-            stride_order = ir.get_stride_order(guard(layout_dw.stride))
-            input = ir.ExternKernel.require_stride_order(input, stride_order)  # type: ignore[assignment]
-            grad_out = ir.ExternKernel.require_stride_order(grad_out, stride_order)  # type: ignore[assignment]
+            layout_dw = conv_bwd_weight_layout(grad_out, input, weight, **kwargs)
+            req_stride_order = ir.get_stride_order(
+                V.graph.sizevars.guarding_hints_or_throw(layout_dw.stride)
+            )
+            input = ir.ExternKernel.require_stride_order(input, req_stride_order)  # type: ignore[assignment]
+            grad_out = ir.ExternKernel.require_stride_order(grad_out, req_stride_order)  # type: ignore[assignment]
 
         args_w = [input, grad_out]
 
@@ -1064,7 +1068,6 @@ def convolution_backward_lowering(
     dx = None
     choices_dx = []
     args_x = []
-    layout_dx = conv_bwd_input_layout(grad_out, input, weight, **kwargs)
     if output_mask[0]:
         if V.graph.layout_opt and ndim == 2:
             V.graph.num_channels_last_conv += 1
@@ -1072,10 +1075,12 @@ def convolution_backward_lowering(
             weight = ir.ExternKernel.require_channels_last(weight)  # type: ignore[assignment]
             layout_dx = conv_bwd_input_layout(grad_out, input, weight, **kwargs)
         else:
-            guard = V.graph.sizevars.guard_int_seq
-            stride_order = ir.get_stride_order(guard(layout_dx.stride))
-            grad_out = ir.ExternKernel.require_stride_order(grad_out, stride_order)  # type: ignore[assignment]
-            weight = ir.ExternKernel.require_stride_order(weight, stride_order)  # type: ignore[assignment]
+            layout_dx = conv_bwd_input_layout(grad_out, input, weight, **kwargs)
+            req_stride_order = ir.get_stride_order(
+                V.graph.sizevars.guarding_hints_or_throw(layout_dx.stride)
+            )
+            grad_out = ir.ExternKernel.require_stride_order(grad_out, req_stride_order)  # type: ignore[assignment]
+            weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)  # type: ignore[assignment]
 
         args_x = [grad_out, weight]
 
