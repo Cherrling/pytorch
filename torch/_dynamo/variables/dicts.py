@@ -159,6 +159,12 @@ class ConstDictVariable(VariableTracker):
             for k, v in self.items.items()
         }
 
+    def str_impl(self, tx: "InstructionTranslator") -> "VariableTracker | None":
+        try:
+            return VariableTracker.build(tx, str(self.as_python_constant()))
+        except NotImplementedError:
+            return None
+
     def keys_as_python_constant(self) -> dict[Any, VariableTracker]:
         self.install_dict_keys_match_guard()
         return {k.vt.as_python_constant(): v for k, v in self.items.items()}
@@ -1145,6 +1151,15 @@ class DictViewVariable(VariableTracker):
         if name in self.python_type().__dict__:
             return ConstantVariable.create(True)
         return ConstantVariable.create(False)
+
+    def str_impl(self, tx: "InstructionTranslator") -> "VariableTracker | None":
+        try:
+            d = self.dv_dict.as_python_constant()
+            assert self.kv is not None
+            view = getattr(d, self.kv)()
+            return VariableTracker.build(tx, str(view))
+        except NotImplementedError:
+            return None
 
     def call_method(
         self,

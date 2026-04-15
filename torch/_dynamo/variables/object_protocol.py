@@ -3,7 +3,7 @@ Dynamo implementations of CPython's PyObject_* default slot algorithms.
 
 Analogous to CPython's Objects/object.c, this module holds the general
 dispatch machinery that is independent of any specific type.
-Per-type hook implementations (bool_impl, richcompare_impl, etc.)
+Per-type hook implementations (bool_impl, str_impl, richcompare_impl, etc.)
 live in their respective VT files.
 """
 
@@ -208,6 +208,58 @@ def generic_bool(tx: "InstructionTranslator", obj: VariableTracker) -> VariableT
         handle_observed_exception(tx)
 
     return ConstantVariable.create(True)
+
+
+def generic_str(
+    tx: "InstructionTranslator", obj: "VariableTracker"
+) -> "VariableTracker":
+    """Mirrors PyObject_Str.
+
+    https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L781-L829
+
+    Resolution order: str identity check -> is_python_constant -> str_impl ->
+    unsupported.
+
+    Unlike generic_bool/generic_len, this does not gate on a C-level tp_str
+    slot check (tp_str is not yet exposed via get_type_slots in the C++
+    layer).  CPython falls back to tp_repr when tp_str is NULL; VTs that need
+    object.__str__ -> repr behavior handle it in their str_impl for now.
+    TODO: expose tp_str in torch._C._dynamo.get_type_slots and gate dispatch
+    on it, then wire a generic repr fallback here.
+    """
+    from .constant import ConstantVariable
+
+    try:
+        if obj.python_type() is str:
+            return obj
+    except NotImplementedError:
+        pass
+
+    if obj.is_python_constant():
+        return ConstantVariable.create(str(obj.as_python_constant()))
+
+    result = obj.str_impl(tx)
+    if result is not None:
+        try:
+            result_type = result.python_type()
+        except NotImplementedError:
+            return result
+        if not issubclass(result_type, str):
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[f"__str__ returned non-string (type {result_type.__name__})"],
+            )
+        return result
+
+    unimplemented(
+        gb_type="Unsupported str() call",
+        context=f"str({obj})",
+        explanation=f"Dynamo does not know how to trace str() on {obj.python_type_name()}",
+        hints=[
+            *graph_break_hints.SUPPORTABLE,
+        ],
+    )
 
 
 def vt_getitem(

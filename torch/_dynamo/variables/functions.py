@@ -580,6 +580,12 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return self.fn
         return super().get_real_python_backed_value()
 
+    def str_impl(self, tx: Any) -> "VariableTracker | None":
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/funcobject.c#L1046
+        # PyFunction_Type has tp_str = NULL, so CPython falls back to tp_repr
+        # which produces "<function name at 0xaddr>". We evaluate at trace time.
+        return VariableTracker.build(tx, str(self.fn))
+
     def self_args(self) -> list[VariableTracker]:
         return []
 

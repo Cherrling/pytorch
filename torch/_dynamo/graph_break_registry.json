@@ -2302,6 +2302,16 @@
       "Hints": []
     }
   ],
+  "GB6473": [
+    {
+      "Gb_type": "Unsupported str() call",
+      "Context": "str({obj})",
+      "Explanation": "Dynamo does not know how to trace str() on {obj.python_type_name()}",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0177": [
     {
       "Gb_type": "can't handle functions not implemented in python ",

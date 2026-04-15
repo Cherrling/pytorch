@@ -625,6 +625,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             from .object_protocol import generic_len
 
             return generic_len(tx, self)
+        elif name == "__str__" and not (args or kwargs):
+            from .object_protocol import generic_str
+
+            return generic_str(tx, self)
         elif (
             name == "__getattr__"
             and len(args) == 1
@@ -1043,6 +1047,21 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             "the corresponding VariableTracker doesn't implement nb_float_impl.",
             hints=[*graph_break_hints.SUPPORTABLE],
         )
+
+    def str_impl(
+        self,
+        tx: Any,
+    ) -> VariableTracker | None:
+        """Mirrors CPython's tp_str slot.
+
+        https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L781-L829
+
+        Returns a VariableTracker wrapping the str result, or None if this VT
+        does not implement tp_str. The current generic_str dispatcher treats
+        that as unsupported unless a VT-specific implementation handles the
+        default object.__str__ -> repr behavior itself.
+        """
+        return None
 
     def __init__(
         self,

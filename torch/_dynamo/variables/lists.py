@@ -103,6 +103,12 @@ class BaseListVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self.python_type()([x.as_python_constant() for x in self.items])
 
+    def str_impl(self, tx: "InstructionTranslator") -> "VariableTracker | None":
+        try:
+            return VariableTracker.build(tx, str(self.as_python_constant()))
+        except NotImplementedError:
+            return None
+
     def as_proxy(self) -> Any:
         assert self.python_type() is not SizeVariable
         return self.python_type()(self._as_proxy())
