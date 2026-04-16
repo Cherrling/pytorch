@@ -649,7 +649,9 @@ class TestRMSNormQuackOverride(TestCase):
                 x1.grad, x2.grad, msg=f"x_grad shape={shape} dtype={dtype}"
             )
             self.assertEqual(
-                w1.grad, w2.grad, msg=f"w_grad shape={shape} dtype={dtype}",
+                w1.grad,
+                w2.grad,
+                msg=f"w_grad shape={shape} dtype={dtype}",
                 **w_grad_tol,
             )
 
