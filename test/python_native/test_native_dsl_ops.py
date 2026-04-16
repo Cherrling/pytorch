@@ -566,9 +566,6 @@ class TestNativeDSLOps(TestCase):
 instantiate_parametrized_tests(TestNativeDSLOps)
 
 
-from torch.testing._internal.common_cuda import SM90OrLater
-
-
 def _rmsnorm_override_registered():
     """Check if the quack RMSNorm override is actually registered in the dispatcher."""
     try:
@@ -582,7 +579,6 @@ def _rmsnorm_override_registered():
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
 @skipIfNoCuteDSL
 @unittest.skipIf(not _rmsnorm_override_registered(), "RMSNorm override not registered")
-@unittest.skipIf(not SM90OrLater, "requires SM90+")
 class TestRMSNormQuackOverride(TestCase):
     """Compare quack RMSNorm override against the ATen fallback kernel."""
 
@@ -596,8 +592,6 @@ class TestRMSNormQuackOverride(TestCase):
 
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_fused_rms_norm_fwd(self, dtype):
-        atol = 1e-1 if dtype in (torch.float16, torch.bfloat16) else 1e-5
-
         for shape in self.SHAPES:
             normalized_shape = list(shape[-1:])
             x = torch.randn(*shape, dtype=dtype, device="cuda")
@@ -614,25 +608,19 @@ class TestRMSNormQuackOverride(TestCase):
                     x, normalized_shape, w, self.EPS
                 )
 
-            self.assertEqual(
-                y, y_ref, atol=atol, rtol=0, msg=f"fwd shape={shape} dtype={dtype}"
-            )
-            self.assertEqual(
-                rstd,
-                rstd_ref,
-                atol=1e-5,
-                rtol=0,
-                msg=f"rstd shape={shape} dtype={dtype}",
-            )
+            self.assertEqual(y, y_ref, msg=f"fwd shape={shape} dtype={dtype}")
+            self.assertEqual(rstd, rstd_ref, msg=f"rstd shape={shape} dtype={dtype}")
 
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_fused_rms_norm_bwd(self, dtype):
-        # might be too high but still within 1ULP
-        atol = (
-            3e-1
-            if dtype == torch.bfloat16
-            else (1e-1 if dtype == torch.float16 else 1e-5)
-        )
+        # w_grad is a reduction across rows; different summation orders
+        # between quack and ATen cause cancellation-driven divergence
+        # near zero, requiring a larger atol floor.
+        w_grad_tol = {
+            torch.bfloat16: {"atol": 1e-1, "rtol": 1.6e-1},
+            torch.float16: {"atol": 1e-2, "rtol": 2e-2},
+            torch.float32: {"atol": 1e-5, "rtol": 1e-5},
+        }[dtype]
 
         for shape in self.SHAPES:
             normalized_shape = list(shape[-1:])
@@ -658,18 +646,11 @@ class TestRMSNormQuackOverride(TestCase):
                 y_ref.backward(grad_out)
 
             self.assertEqual(
-                x1.grad,
-                x2.grad,
-                atol=atol,
-                rtol=0,
-                msg=f"x_grad shape={shape} dtype={dtype}",
+                x1.grad, x2.grad, msg=f"x_grad shape={shape} dtype={dtype}"
             )
             self.assertEqual(
-                w1.grad,
-                w2.grad,
-                atol=atol,
-                rtol=0,
-                msg=f"w_grad shape={shape} dtype={dtype}",
+                w1.grad, w2.grad, msg=f"w_grad shape={shape} dtype={dtype}",
+                **w_grad_tol,
             )
 
 
