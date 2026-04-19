@@ -290,6 +290,8 @@ def _create_block_mask_for_device(
         major, _ = torch.cuda.get_device_capability(dev)
         if major == 8:
             kv_block = 64
+        elif major == 9:
+            q_block = 192
         elif major == 10:
             q_block *= 2
     return create_block_mask(
@@ -815,10 +817,6 @@ GQA_MQA_BLOCK_MASK_CASES = [
 class TestFlexFlash(InductorTestCase):
     # `FlashAttentionForwardSm120` does not have `apply_score_mod`.
     @xfailIfSM120OrLater
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: params["case"].requires_grad and IS_SM90,
-    )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", SCORE_MOD_CASES, name_fn=score_case_name)
     def test_flash_attention_score_mod_cases(self, device, dtype, case):
@@ -890,6 +888,7 @@ class TestFlexFlash(InductorTestCase):
             and params["case"].score_mod_factory is not None
         ),
     )
+    @decorateIf(unittest.expectedFailure, lambda params: IS_SM90)
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", MASK_MOD_CASES, name_fn=mask_case_name)
     def test_flash_attention_mask_mod_cases(self, device, dtype, case):
@@ -980,7 +979,7 @@ class TestFlexFlash(InductorTestCase):
     @decorateIf(
         unittest.expectedFailure,
         lambda params: (
-            SM120OrLater
+            (SM120OrLater or IS_SM90)
             and params["case"].name
             in {
                 "backward_block_mask_causal",
@@ -1042,7 +1041,7 @@ class TestFlexFlash(InductorTestCase):
     @decorateIf(
         unittest.expectedFailure,
         lambda params: (
-            SM120OrLater
+            (SM120OrLater or IS_SM90)
             and params["case"].name
             in {
                 "gqa_block_mask_causal",
@@ -1472,7 +1471,6 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             self._flash_triton_dynamic(q, k, v)
 
     @xfailIfSM120OrLater
-    @xfailIfSM90
     def test_dynamic_backward(self):
         """Test backward with dynamic sequence lengths."""
         self._run_dynamic_test(seq_lens=[128, 256, 512], requires_grad=True)
