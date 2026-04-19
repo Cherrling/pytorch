@@ -11,26 +11,16 @@
 
 static inline void cpu_atomic_add_float(float* dst, float fvalue)
 {
-  typedef union {
-    unsigned intV;
-    float floatV;
-  } uf32_t;
-
-  uf32_t new_value, old_value;
-  std::atomic<unsigned>* dst_intV = (std::atomic<unsigned>*)dst;
-
-  old_value.floatV = *dst;
-  new_value.floatV = old_value.floatV + fvalue;
-
-  unsigned* old_intV = &old_value.intV;
-  while (!std::atomic_compare_exchange_strong(dst_intV, old_intV, new_value.intV)) {
+  std::atomic_ref<float> atomic_dst(*dst);
+  float old_value = atomic_dst.load();
+  float new_value = old_value + fvalue;
+  while (!atomic_dst.compare_exchange_weak(old_value, new_value)) {
 #ifdef __aarch64__
     __asm__ __volatile__("yield;" : : : "memory");
 #else
     _mm_pause();
 #endif
-    old_value.floatV = *dst;
-    new_value.floatV = old_value.floatV + fvalue;
+    new_value = old_value + fvalue;
   }
 }
 
