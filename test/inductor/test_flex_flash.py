@@ -1477,7 +1477,6 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
     @xfailIfSM120OrLater
-    @xfailIfSM90
     def test_dynamic_backward_with_score_mod(self):
         """Test backward with score_mod and dynamic sequence lengths."""
 
@@ -1715,7 +1714,6 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         self.assertEqual(out.shape, q.shape)
 
     @xfailIfSM120OrLater
-    @xfailIfSM90
     def test_dynamic_captured_buffer_varying_heads(self):
         """Dynamic head_count with captured tensor buffer under FLASH/TRITON parity."""
         torch._dynamo.reset()
