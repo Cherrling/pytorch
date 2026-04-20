@@ -8115,6 +8115,32 @@ SavedForBackwardsAOTOutput(idx=5)""",
         )
         self.assertEqual(result.dtype, torch.float32)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "requires gpu with fp8 support")
+    @requires_cuda
+    def test_scaled_mm_v2_fullgraph(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/180604
+        # F.scaled_mm was graph-breaking because torch._scaled_mm_v2 was missing
+        # from torch_c_binding_in_graph_functions in trace_rules.py
+        m, n, k = 15, 32, 16
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16).to(torch.float8_e4m3fn)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16).to(torch.float8_e4m3fn).t().contiguous().t()
+        scale_a = torch.ones(1, device="cuda")
+        scale_b = torch.ones(1, device="cuda")
+
+        def fn(a, b, scale_a, scale_b):
+            return torch.nn.functional.scaled_mm(
+                a, b,
+                scale_a=scale_a,
+                scale_recipe_a=torch.nn.functional.ScalingType.TensorWise,
+                swizzle_a=torch.nn.functional.SwizzleType.NO_SWIZZLE,
+                scale_b=scale_b,
+                scale_recipe_b=torch.nn.functional.ScalingType.TensorWise,
+                swizzle_b=torch.nn.functional.SwizzleType.NO_SWIZZLE,
+                output_dtype=torch.bfloat16,
+            )
+
+        torch.compile(fn, fullgraph=True)(a, b, scale_a, scale_b)
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):
