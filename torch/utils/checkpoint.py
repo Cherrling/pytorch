@@ -1212,11 +1212,19 @@ def _is_compiling(func, args, kwargs):
 
 
 class _VersionWrapper:
-    def __init__(self, val) -> None:
+    def __init__(self, val, hooks=None) -> None:
+        if isinstance(val, torch.Tensor) and hooks is not None:
+            pack_hook, _ = hooks
+            val = pack_hook(val)
         self.val: torch.Tensor | Any = val
+        self.hooks = hooks
 
     def get_val(self):
-        return self.val
+        val = self.val
+        if self.hooks is not None:
+            _, unpack_hook = self.hooks
+            val = unpack_hook(val)
+        return val
 
 
 def _detach_with_unexclude(x):
@@ -1236,6 +1244,19 @@ def _detach_with_unexclude(x):
             # this case.
             x = x.detach()
     return x
+
+
+def _get_user_hooks():
+    """Get user-registered saved tensor hooks, skipping checkpoint's own hooks."""
+    top = torch._C._autograd._top_saved_tensors_default_hooks(True)
+    if top is None:
+        return None
+    # Pop checkpoint's hooks to see if there are user hooks underneath
+    torch._C._autograd._pop_saved_tensors_default_hooks()
+    user_hooks = torch._C._autograd._top_saved_tensors_default_hooks(True)
+    # Restore checkpoint's hooks
+    torch._C._autograd._push_saved_tensors_default_hooks(*top)
+    return user_hooks
 
 
 class SelectiveCheckpointContext:
@@ -1335,8 +1356,9 @@ def save_tensor(tensor: torch.Tensor) -> None:
     if info is None:
         return
     func, idx = info
+    hooks = mode.user_hooks
     mode.storage[func][idx] = tree_map(
-        lambda x: _VersionWrapper(_detach_with_unexclude(x)),
+        lambda x: _VersionWrapper(_detach_with_unexclude(x), hooks),
         tensor,
     )
 
@@ -1353,6 +1375,11 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         self.ac_graph_id = ac_graph_id
         self.func_counter: Dict[Any, int] = defaultdict(int)
         self.tensor_tracker: WeakTensorKeyDictionary = WeakTensorKeyDictionary()
+        self.user_hooks = None
+
+    def __enter__(self):
+        self.user_hooks = _get_user_hooks()
+        return super().__enter__()
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = {} if kwargs is None else kwargs
@@ -1399,7 +1426,9 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                     node.meta["recompute"] = policy
 
         if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
-            self.storage[func][idx] = tree_map(lambda x: _VersionWrapper(_detach_with_unexclude(x)), out)
+            hooks = self.user_hooks
+            self.storage[func][idx] = tree_map(
+                lambda x: _VersionWrapper(_detach_with_unexclude(x), hooks), out)
         return out
 
 class _CachedTorchDispatchMode(TorchDispatchMode):
