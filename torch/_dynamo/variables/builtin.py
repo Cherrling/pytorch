@@ -67,7 +67,6 @@ from ..utils import (
     cmp_name_to_op_mapping,
     dict_methods,
     extract_fake_example_value,
-    frozenset_methods,
     get_fake_value,
     guard_if_dyn,
     is_tensor_getset_descriptor,
@@ -76,7 +75,6 @@ from ..utils import (
     numpy_operator_wrapper,
     proxy_args_kwargs,
     raise_args_mismatch,
-    set_methods,
     specialize_symnode,
     str_methods,
     tensortype_to_dtype,
@@ -1563,20 +1561,12 @@ class BuiltinVariable(BaseBuiltinVariable):
             # object.__init__ is a no-op
             return variables.ConstantVariable.create(None)
 
-        if self.fn is set:
-            resolved_fn = getattr(self.fn, name)
-            if resolved_fn in set_methods:
-                if isinstance(args[0], variables.UserDefinedSetVariable):
-                    assert args[0]._base_vt is not None
-                    return args[0]._base_vt.call_method(tx, name, args[1:], kwargs)
-                elif isinstance(args[0], variables.SetVariable):
-                    return args[0].call_method(tx, name, args[1:], kwargs)
-
-        if self.fn is frozenset:
-            resolved_fn = getattr(self.fn, name)
-            if resolved_fn in frozenset_methods:
-                if isinstance(args[0], variables.FrozensetVariable):
-                    return args[0].call_method(tx, name, args[1:], kwargs)
+        if self.fn in (set, frozenset, list, tuple):
+            if isinstance(args[0], variables.UserDefinedObjectVariable):
+                assert args[0]._base_vt is not None
+                return args[0]._base_vt.call_method(tx, name, args[1:], kwargs)
+            else:
+                return args[0].call_method(tx, name, args[1:], kwargs)
 
         if self.fn is str and len(args) >= 1:
             resolved_fn = getattr(self.fn, name)
@@ -1598,6 +1588,14 @@ class BuiltinVariable(BaseBuiltinVariable):
             from .object_protocol import generic_len
 
             return generic_len(tx, args[0])
+
+        if name == "__iter__" and len(args) == 1 and not kwargs:
+            # type.__iter__(instance) → iter(instance)
+            # e.g., tuple.__iter__(my_tuple) → iter(my_tuple)
+            # For builtin types called on user-defined subclasses, use the base iterator
+            from .object_protocol import generic_getiter
+
+            return generic_getiter(tx, args[0])
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -2048,6 +2046,22 @@ class BuiltinVariable(BaseBuiltinVariable):
         else:
             return self._call_iter_tuple_list(tx, obj, *args, **kwargs)
 
+    def call_iter(
+        self,
+        tx: "InstructionTranslator",
+        obj: VariableTracker,
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker:
+        from .object_protocol import generic_getiter
+
+        if len(args) == 0:
+            return generic_getiter(tx, obj)
+        else:
+            return variables.UserFunctionVariable(
+                polyfills.builtins.callable_iterator
+            ).call_function(tx, [obj, *args], kwargs)
+
     call_tuple = _call_tuple_list
 
     def call_callable(
@@ -2134,7 +2148,9 @@ class BuiltinVariable(BaseBuiltinVariable):
         elif isinstance(arg, variables.UserDefinedObjectVariable) and isinstance(
             arg.value, KeysView
         ):
-            iter_fn = arg.var_getattr(tx, "__iter__")
+            from .object_protocol import generic_getiter
+
+            iter_fn = generic_getiter(tx, arg)
             if isinstance(iter_fn, variables.UserMethodVariable):
                 out = tx.inline_user_function_return(iter_fn, args, kwargs)
                 if isinstance(out, SetVariable):
@@ -3388,47 +3404,23 @@ class IterBuiltinVariable(BaseBuiltinVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Python/bltinmodule.c#L1666-L1682
+
         if not args:
-            unimplemented(
-                gb_type="iter() with no arguments",
-                context="iter()",
-                explanation="iter() requires at least one argument",
-                hints=[*graph_break_hints.USER_ERROR],
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=["iter expected at least 1 argument, got 0"],
             )
-        obj, *rest = args
 
-        # Fast path: for known iterable VT types, call __iter__ directly
-        # instead of going through the polyfill, saving tracing overhead.
-        if (
-            not rest
-            and not kwargs
-            and isinstance(
-                obj,
-                (
-                    variables.ListVariable,
-                    variables.RangeVariable,
-                    variables.IteratorVariable,
-                    variables.ConstDictVariable,
-                    variables.NNModuleVariable,
-                    variables.TensorVariable,
-                    variables.TupleVariable,
-                    variables.UserDefinedClassVariable,
-                    DictViewVariable,
-                ),
-            )
-        ):
-            return obj.call_method(tx, "__iter__", [], {})
+        if len(args) == 1:
+            from .object_protocol import generic_getiter
 
-        # General case: inline the polyfill which handles __iter__ and __getitem__
-        ret = variables.UserFunctionVariable(
-            polyfills.builtins.iter_  # type: ignore[arg-type]
-        ).call_function(tx, [obj, *rest], {})
-
-        if rest:
-            # iter(obj, sentinel) returns a callable iterator; wrap it so
-            # Dynamo knows to forward __next__ calls to the returned object.
-            ret = variables.ObjectIteratorVariable(ret)
-        return ret
+            return generic_getiter(tx, args[0])
+        else:
+            return variables.UserFunctionVariable(
+                polyfills.builtins.callable_iterator
+            ).call_function(tx, args, kwargs)
 
 
 class ListBuiltinVariable(BaseBuiltinVariable):
