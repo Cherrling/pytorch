@@ -473,18 +473,27 @@ class FSDPParamGroup:
                 return
         self._to_sharded()
 
+    @_dynamo_disable
     def pre_forward(
         self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         logger.debug("%s", self._with_fqn("FSDP::pre_forward"))
         with record_function(self._with_fqn("FSDP::pre_forward")):
+            # FORWARD at entry means another module in the grouped
+            # ``fully_shard([a, b])`` already registered post_backward this
+            # pass; skip to avoid duplicate ``RegisterPostBackwardFunction``
+            # autograd nodes.
+            group_first_in_pass = self._training_state != TrainingState.FORWARD
             self._training_state = TrainingState.FORWARD
             self.unshard(self.unshard_async_op)
             self.wait_for_unshard()
-            args, kwargs = self._register_post_backward_hook(args, kwargs)
+            if group_first_in_pass:
+                args, kwargs = self._register_post_backward_hook(args, kwargs)
             return args, kwargs
 
-    def post_forward(self, module: nn.Module, input: Any, output: Any):
+    def post_forward(self, module: nn.Module | None, input: Any, output: Any) -> Any:
+        # ``module`` is optional so callers outside ``register_forward_hook``
+        # (e.g. ``_force_complete_incomplete_states``) can pass ``None``.
         logger.debug("%s", self._with_fqn("FSDP::post_forward"))
         with record_function(self._with_fqn("FSDP::post_forward")):
             # for AC(fully_shard(model)), AC runs fsdp's _pre_forward
@@ -755,6 +764,10 @@ class FSDPParamGroup:
     def _register_post_backward_hook(
         self, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        # ``pre_forward`` gates this via ``group_first_in_pass``, so within
+        # a single grouped pass only the first module's call reaches here,
+        # but repeat invocations (e.g. per-chunk head calls) each register
+        # their own autograd node.
         if not torch.is_grad_enabled():
             return args, kwargs
 
